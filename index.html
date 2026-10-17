@@ -41,6 +41,8 @@ legend{font-family:var(--display);font-weight:700;font-size:.95rem;text-transfor
 .row3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px}
 label{display:flex;flex-direction:column;gap:4px;font-size:.85rem;font-weight:600;min-width:0}
 label small{font-weight:400;color:var(--muted)}
+.row > label > input,.row > label > select,.row3 > label > input,.row3 > label > select{margin-top:auto}
+label small:empty{display:none}
 input[type=text],select{font:inherit;font-size:1rem;color:var(--ink);background:var(--field);border:1px solid var(--line);border-radius:6px;padding:8px 10px;width:100%;min-width:0;font-variant-numeric:tabular-nums}
 input[type=text]:focus,select:focus,button:focus-visible,summary:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
 .check{flex-direction:row;align-items:center;gap:8px;font-weight:500}
@@ -79,11 +81,6 @@ tr:last-child td{border-bottom:0}
 .hint{margin:4px 0 -2px;font-size:.82rem;color:var(--muted)}
 #furnBox{display:flex;flex-direction:column;gap:10px}
 #furnBox[hidden]{display:none}
-.logoRow{display:flex;gap:12px;align-items:center;flex-wrap:wrap}
-.logoPrev{width:140px;height:60px;border:1px dashed var(--line);border-radius:6px;background:#FFFFFF;display:flex;align-items:center;justify-content:center;color:#7A8588;font-size:.8rem;overflow:hidden}
-.logoPrev img{max-width:100%;max-height:100%;object-fit:contain}
-.logoBtns{display:flex;gap:8px;flex-wrap:wrap}
-.filebtn{flex-direction:row;font-size:.9rem;padding:8px 12px}
 </style>
 </head>
 <body>
@@ -99,18 +96,6 @@ tr:last-child td{border-bottom:0}
   <div class="grid">
     <form id="f" autocomplete="off">
       <fieldset>
-        <legend>Logo</legend>
-        <div class="logoRow">
-          <div class="logoPrev" id="logoPrev">Sem logo</div>
-          <div class="logoBtns">
-            <label class="btn ghost filebtn" for="logoFile">Escolher imagem</label>
-            <input type="file" id="logoFile" accept="image/png,image/jpeg,image/webp,image/svg+xml" hidden>
-            <button type="button" class="btn ghost" id="logoRemove" hidden>Usar logo padr&#xe3;o</button>
-          </div>
-        </div>
-      </fieldset>
-
-      <fieldset>
         <legend>Pedido</legend>
         <label>Cliente <input type="text" id="cliente" placeholder="Nome do cliente"></label>
         <div class="row">
@@ -120,10 +105,10 @@ tr:last-child td{border-bottom:0}
       </fieldset>
 
       <fieldset>
-        <legend>Parede (cm)</legend>
+        <legend id="paredeLegend">Parede (cm)</legend>
         <div class="row">
-          <label>Largura <small id="wallWHint">cm</small><input type="text" id="wallW" inputmode="decimal"></label>
-          <label>Altura <input type="text" id="wallH" inputmode="decimal"></label>
+          <label><span id="wallWTxt">Largura</span> <small id="wallWHint"></small><input type="text" id="wallW" inputmode="decimal"></label>
+          <label><span id="wallHTxt">Altura</span> <input type="text" id="wallH" inputmode="decimal"></label>
         </div>
       </fieldset>
 
@@ -155,6 +140,7 @@ tr:last-child td{border-bottom:0}
             <option value="aparador">Aparador</option>
             <option value="personalizado">Outro m&#xf3;vel</option>
             <option value="meio">Centro da altura da parede (quadros muito grandes)</option>
+            <option value="espaco">Centralizar em um espa&#xe7;o (largura &#xd7; altura)</option>
           </select>
         </label>
         <div id="furnBox" hidden>
@@ -169,6 +155,7 @@ tr:last-child td{border-bottom:0}
           </div>
           <label id="gapFurnLabel">Dist&#xe2;ncia acima <small>do m&#xf3;vel &#xe0; base do quadro mais baixo, cm</small><input type="text" id="furnGap" inputmode="decimal"></label>
         </div>
+        <p class="hint" id="spaceHint" hidden>Informe acima a largura e a altura do espa&#xe7;o livre (ex.: parede acima de um m&#xf3;vel, nicho, painel). O conjunto fica centralizado nele e as medidas partem da base e da lateral esquerda do espa&#xe7;o.</p>
         <label id="centerLabel">Centro do conjunto <small>cm do piso</small><input type="text" id="center" inputmode="decimal" placeholder="160"></label>
         <div id="furnBox2" hidden>
           <label>Posi&#xe7;&#xe3;o horizontal
@@ -246,6 +233,7 @@ const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 const REFS = {
   livre:         { name: 'Parede livre' },
   meio:          { name: 'Centro da altura da parede' },
+  espaco:        { name: 'Espa\u00e7o' },
   cabeceira:     { name: 'Cabeceira', gap: 20, hLabel: 'Altura da cabeceira', hHint: 'topo, cm do piso', wLabel: 'Largura da cama', top: 'topo', limitW: true },
   sofa:          { name: 'Sof\u00e1', gap: 30, hLabel: 'Altura do encosto', hHint: 'topo do encosto, n\u00e3o o assento', wLabel: 'Largura do sof\u00e1', top: 'topo do encosto' },
   aparador:      { name: 'Aparador', gap: 40, hLabel: 'Altura do aparador', hHint: 'tampo, cm do piso', wLabel: 'Largura do aparador', top: 'tampo' },
@@ -256,15 +244,16 @@ const isFurn = ref => !!(REFS[ref] && REFS[ref].gap !== undefined);
 function compute(s){
   const errors = [], warnings = [];
   const ref = REFS[s.ref] ? s.ref : 'livre';
+  const sp = ref === 'espaco';
   const furn = isFurn(ref);
   const hm = furn ? (['borda', 'eixo', 'parede'].includes(s.hRef) ? s.hRef : 'borda') : 'parede';
   const eixo = hm !== 'parede'; // parede virtual: refer\u00eancia no m\u00f3vel
   let W = num(s.wallW);
   const H = num(s.wallH, 270);
   const nRaw = num(s.qty), n = Math.round(nRaw);
-  if (!eixo && !(W > 0)) errors.push('Informe a largura da parede.');
+  if (!eixo && !(W > 0)) errors.push(sp ? 'Informe a largura do espa\u00e7o.' : 'Informe a largura da parede.');
   const wallGiven = W > 0 ? W : null;
-  if (!(H > 0)) errors.push('A altura da parede precisa ser um n\u00famero maior que zero.');
+  if (!(H > 0)) errors.push(sp ? 'Informe a altura do espa\u00e7o.' : 'A altura da parede precisa ser um n\u00famero maior que zero.');
   if (!(n >= 1 && n <= 10)) errors.push('A quantidade de quadros deve ser de 1 a 10.');
   const gap = n > 1 ? num(s.gap) : 0;
   if (n > 1 && !(gap >= 0)) errors.push('Informe a dist\u00e2ncia entre quadros.');
@@ -316,14 +305,14 @@ function compute(s){
   const left = axis - totalW / 2 + shift;
   const right = W - left - totalW;
   if (totalW > W){
-    errors.push(`O conjunto mede ${fmt(totalW)} cm e n\u00e3o cabe na parede de ${fmt(W)} cm.`);
+    errors.push(`O conjunto mede ${fmt(totalW)} cm e n\u00e3o cabe ${sp ? 'no espa\u00e7o' : 'na parede'} de ${fmt(W)} cm.`);
     return { ok:false, errors, warnings };
   }
   if (left < 0 || right < 0){
     errors.push(hasFX ? 'Centralizado no m\u00f3vel, o conjunto sai da parede. Ajuste "Deslocar conjunto" ou confira a posi\u00e7\u00e3o do m\u00f3vel.' : 'O deslocamento empurra o conjunto para fora da parede. Reduza o valor em "Deslocar conjunto".');
     return { ok:false, errors, warnings };
   }
-  if (!eixo && Math.min(left, right) < 10) warnings.push(`Margem lateral pequena: ${fmt(Math.min(left, right))} cm entre a moldura e o canto da parede.`);
+  if (!eixo && Math.min(left, right) < 10) warnings.push(`Margem lateral pequena: ${fmt(Math.min(left, right))} cm entre a moldura e ${sp ? 'a lateral do espa\u00e7o' : 'o canto da parede'}.`);
   if (hasFX){
     if (totalW > fW) warnings.push(REFS[ref].limitW
       ? `O conjunto (${fmt(totalW)} cm) \u00e9 mais largo que a cama (${fmt(fW)} cm). O recomendado \u00e9 que a cama seja o limite da largura.`
@@ -334,7 +323,7 @@ function compute(s){
   const Amax = Math.max(...sizes.map(p => p.A));
   const align = ['base', 'centro', 'topo'].includes(s.align) ? s.align : 'centro';
   const vMode = furn ? (s.vMode === 'center' ? 'center' : 'gap') : 'center';
-  const cEff = ref === 'meio' ? H / 2 : c;
+  const cEff = ref === 'meio' || sp ? H / 2 : c;
   const base0 = furn ? fH + fGap : NaN;
   const byGap = furn && vMode === 'gap';
   const frames = [], holes = [];
@@ -351,9 +340,10 @@ function compute(s){
       else top = cEff + p.A / 2;
     }
     const hole = top - off;
-    if (top > H) errors.push(`Quadro ${i+1}: o topo ficaria a ${fmt(top)} cm do piso, acima da altura da parede.`);
-    else if (H - top < 15) warnings.push(`Quadro ${i+1}: topo a apenas ${fmt(H - top)} cm do teto.${ref === 'livre' ? ' Para quadros muito grandes, considere "Centro da altura da parede".' : ''}`);
-    if (top - p.A < 0) errors.push(`Quadro ${i+1}: a base ficaria abaixo do piso. Aumente o centro do quadro.`);
+    if (sp && (top > H + 0.01 || top - p.A < -0.01)) errors.push(`Quadro ${i+1}: com ${fmt(p.A)} cm de altura, n\u00e3o cabe na altura do espa\u00e7o (${fmt(H)} cm).`);
+    else if (top > H) errors.push(`Quadro ${i+1}: o topo ficaria a ${fmt(top)} cm do piso, acima da altura da parede.`);
+    else if (!sp && H - top < 15) warnings.push(`Quadro ${i+1}: topo a apenas ${fmt(H - top)} cm do teto.${ref === 'livre' ? ' Para quadros muito grandes, considere "Centro da altura da parede".' : ''}`);
+    if (!sp && top - p.A < 0) errors.push(`Quadro ${i+1}: a base ficaria abaixo do piso. Aumente o centro do quadro.`);
     frames.push({ i: i + 1, L: p.L, A: p.A, x0: x, top, hole });
     holes.push({ frame: i + 1, x: x + d, h: hole });
     holes.push({ frame: i + 1, x: x + p.L - d, h: hole });
@@ -370,6 +360,7 @@ function compute(s){
   const distinctA = new Set(sizes.map(p => p.A));
   if (distinctA.size > 1) warnings.push(`Quadros com alturas diferentes: alinhados ${({ base: 'pela base', centro: 'pelo centro', topo: 'pelo topo' })[align]}${byGap && align !== 'base' ? ', com o quadro mais alto respeitando a dist\u00e2ncia do m\u00f3vel' : ''}.`);
   const minBase = Math.min(...frames.map(f => f.top - f.A));
+  if (sp && minBase > 40) warnings.push(`O quadro fica a ${fmt(minBase)} cm da base do espa\u00e7o. Se o espa\u00e7o vai at\u00e9 o teto acima de um m\u00f3vel, o conjunto pode ficar alto; o usual \u00e9 de 20 a 30 cm acima do m\u00f3vel (use a refer\u00eancia do m\u00f3vel nesse caso).`);
   const realGap = furn ? minBase - fH : NaN;
   if (furn && !byGap){
     if (realGap < 0) { errors.push(`Com o centro a ${fmt(cEff)} cm, o quadro mais baixo invade o m\u00f3vel em ${fmt(-realGap)} cm. Aumente o centro do conjunto.`); return { ok:false, errors, warnings }; }
@@ -377,7 +368,7 @@ function compute(s){
   }
   const furniture = furn ? { name: REFS[ref].name, top: REFS[ref].top, h: fH, gap: realGap, vMode, x: hasFX ? fX : null, w: hasFX ? fW : null, centered: eixo || hasFX } : null;
   holes.forEach(h => h.ax = h.x - axis);
-  return { ok:true, errors, warnings, W, H, n, gap, c: cEff, d, off, totalW, left, right, frames, holes, align, ref, furniture, eixo, axis, hmode: hm };
+  return { ok:true, errors, warnings, space: sp, W, H, n, gap, c: cEff, d, off, totalW, left, right, frames, holes, align, ref, furniture, eixo, axis, hmode: hm };
 }
 
 function drawing(R){
@@ -406,7 +397,7 @@ function drawing(R){
     o += `<rect x="0" y="0" width="${W}" height="${H}" fill="#FFFFFF" stroke="${INK}" stroke-width="${sw(0.14)}"/>`;
   }
   o += `<line x1="${-fs*2.8}" y1="${H}" x2="${W + padR - fs*0.6}" y2="${H}" stroke="${INK}" stroke-width="${sw(0.32)}"/>`;
-  o += `<text x="${fs*0.4}" y="${H + fs*1.3}" font-size="${fs*0.62}" fill="${GREY}" letter-spacing="${fs*0.06}">PISO ACABADO</text>`;
+  o += `<text x="${fs*0.4}" y="${H + fs*1.3}" font-size="${fs*0.62}" fill="${GREY}" letter-spacing="${fs*0.06}">${R.space ? 'BASE DO ESPA\u00c7O' : 'PISO ACABADO'}</text>`;
 
   // m\u00f3vel de refer\u00eancia
   if (R.furniture){
@@ -428,6 +419,17 @@ function drawing(R){
     }
   }
 
+  // folga entre a base do espa\u00e7o e o quadro mais baixo
+  if (R.space){
+    const fr = R.frames.reduce((a, f) => (f.top - f.A) < (a.top - a.A) ? f : a, R.frames[0]), baseY = Y(fr.top - fr.A);
+    if (baseY < H - fs * 0.5){
+      const xg = fr.x0 - fs * 1.2;
+      o += `<line x1="${xg}" y1="${H}" x2="${xg}" y2="${baseY}" stroke="${INK}" stroke-width="${sw(0.07)}"/>`;
+      o += `<line x1="${xg - fs*0.5}" y1="${baseY}" x2="${fr.x0}" y2="${baseY}" stroke="${GREY}" stroke-width="${sw(0.05)}"/>`;
+      o += tick(xg, H).replaceAll(RED, INK) + tick(xg, baseY).replaceAll(RED, INK);
+      o += `<text transform="translate(${xg - fs*0.4},${(H + baseY) / 2}) rotate(-90)" text-anchor="middle" font-size="${fs*0.75}" font-weight="700" fill="${INK}">${fmt(H - baseY)}</text>`;
+    }
+  }
   const yChain = yTop - fs * 1.5, yCum = yTop - fs * 4.4;
   const borda = R.hmode === 'borda', FE = R.furniture;
   if (borda){
@@ -447,7 +449,7 @@ function drawing(R){
     o += `<text x="${cx}" y="${cy + fF*0.35}" text-anchor="middle" font-size="${fF}" fill="${BROWN}" font-weight="700">${fmt(f.L)} \u00d7 ${fmt(f.A)}</text>`;
     const fC = Math.min(fF * 0.72, f.L / 10.5, f.A / 9);
     o += `<text x="${cx}" y="${cy + fF*0.35 + fC*1.75}" text-anchor="middle" font-size="${fC}" fill="${GREY}">centro a</text>`;
-    o += `<text x="${cx}" y="${cy + fF*0.35 + fC*2.95}" text-anchor="middle" font-size="${fC}" fill="${GREY}">${fmt(f.center)} cm do piso</text>`;
+    o += `<text x="${cx}" y="${cy + fF*0.35 + fC*2.95}" text-anchor="middle" font-size="${fC}" fill="${GREY}">${fmt(f.center)} cm ${R.space ? 'da base' : 'do piso'}</text>`;
   });
 
   // linhas de n\u00edvel
@@ -501,7 +503,7 @@ function drawing(R){
     o += `<text x="${L.x}" y="${yCum - fs*0.45 - row * fs * 1.15}" text-anchor="middle" font-size="${fs*0.85}" font-weight="700" fill="${INK}">${L.t}</text>`;
     prevEnd = L.x + w / 2; prevRow = row;
   });
-  o += `<text x="${-fs*0.7}" y="${yCum + fs*0.25}" text-anchor="end" font-size="${fs*0.62}" fill="${GREY}">${R.hmode === 'eixo' ? 'Do eixo' : borda ? 'Da borda esq.' : 'Do canto esq.'}</text>`;
+  o += `<text x="${-fs*0.7}" y="${yCum + fs*0.25}" text-anchor="end" font-size="${fs*0.62}" fill="${GREY}">${R.hmode === 'eixo' ? 'Do eixo' : borda ? 'Da borda esq.' : R.space ? 'Da lateral esq.' : 'Do canto esq.'}</text>`;
 
   // furos
   R.holes.forEach(h => {
@@ -526,12 +528,12 @@ function drawing(R){
       o += `<line x1="${xc}" y1="${yF}" x2="${xc}" y2="${yb}" stroke="${INK}" stroke-width="${sw(0.08)}"/>`;
       o += `<polyline points="${xc - fs*0.5},${yb + fs*0.15} ${xc - fs*0.15},${yb - fs*0.25} ${xc + fs*0.15},${yb + fs*0.25} ${xc + fs*0.5},${yb - fs*0.15}" fill="none" stroke="${INK}" stroke-width="${sw(0.08)}"/>`;
       o += `<line x1="${xc}" y1="${yb - fs*0.3}" x2="${xc}" y2="${yTop - fs*0.6}" stroke="${INK}" stroke-width="${sw(0.08)}"/>`;
-      o += `<text x="${xc}" y="${yTop - fs*0.9}" text-anchor="middle" font-size="${fs*0.6}" fill="${INK}">teto</text>`;
+      o += `<text x="${xc}" y="${yTop - fs*0.9}" text-anchor="middle" font-size="${fs*0.6}" fill="${INK}">${R.space ? 'topo do espa\u00e7o' : 'teto'}</text>`;
     } else {
       o += `<line x1="${xc}" y1="${yF}" x2="${xc}" y2="0" stroke="${INK}" stroke-width="${sw(0.08)}"/>`;
       o += `<line x1="${W}" y1="0" x2="${xc + fs*0.4}" y2="0" stroke="${GREY}" stroke-width="${sw(0.06)}"/>`;
       o += tick(xc, 0).replaceAll(RED, INK);
-      o += `<text x="${xc}" y="${-fs*0.6}" text-anchor="middle" font-size="${fs*0.6}" fill="${INK}">teto</text>`;
+      o += `<text x="${xc}" y="${-fs*0.6}" text-anchor="middle" font-size="${fs*0.6}" fill="${INK}">${R.space ? 'topo do espa\u00e7o' : 'teto'}</text>`;
     }
     o += tick(xc, yF).replaceAll(RED, INK);
     const ym = crop ? (yF + yTop) / 2 : yF / 2;
@@ -548,7 +550,7 @@ function drawing(R){
 
   // cotas da parede (ou do m\u00f3vel, no modo eixo)
   const yW = H + fs * 3;
-  let bx0 = 0, bx1 = W, blab = `Parede ${fmt(W)}`;
+  let bx0 = 0, bx1 = W, blab = `${R.space ? 'Espa\u00e7o' : 'Parede'} ${fmt(W)}`;
   if (eixo){
     if (R.furniture && R.furniture.w){ bx0 = R.furniture.x; bx1 = R.furniture.x + R.furniture.w; blab = `${R.furniture.name} ${fmt(R.furniture.w)}`; }
     else bx0 = bx1 = null;
@@ -565,7 +567,7 @@ function drawing(R){
   o += `<line x1="0" y1="0" x2="${xH - fs*0.4}" y2="0" stroke="${GREY}" stroke-width="${sw(0.06)}"/>`;
   o += `<line x1="${xH}" y1="0" x2="${xH}" y2="${H}" stroke="${INK}" stroke-width="${sw(0.07)}"/>`;
   o += tick(xH, 0).replaceAll(RED, INK) + tick(xH, H).replaceAll(RED, INK);
-  o += `<text transform="translate(${xH - fs*0.45},${H / 2}) rotate(-90)" text-anchor="middle" font-size="${fs*0.8}" fill="${INK}">Parede ${fmt(H)}</text>`;
+  o += `<text transform="translate(${xH - fs*0.45},${H / 2}) rotate(-90)" text-anchor="middle" font-size="${fs*0.8}" fill="${INK}">${R.space ? 'Espa\u00e7o' : 'Parede'} ${fmt(H)}</text>`;
 
   }
   return { o, vbX: -padL, vbY: yTop - padT, vbW: W + padL + padR, vbH: H - yTop + padT + padB };
@@ -626,6 +628,7 @@ function composite(R, meta){
   if (F) refTxt = F.vMode === 'center'
     ? `Refer\u00eancia: ${F.name.toLowerCase()} com ${F.top} a ${fmt(F.h)} cm do piso; centro do conjunto a ${fmt(R.c)} cm do piso; quadro mais baixo a ${fmt(F.gap)} cm do m\u00f3vel${F.centered ? '; conjunto centralizado no m\u00f3vel' : ''}.`
     : `Refer\u00eancia: ${F.name.toLowerCase()} com ${F.top} a ${fmt(F.h)} cm do piso; base ${R.frames.length > 1 ? 'do quadro mais baixo' : 'do quadro'} ${fmt(F.gap)} cm acima${F.centered ? '; conjunto centralizado no m\u00f3vel' : ''}.`;
+  else if (R.space) refTxt = `Refer\u00eancia: conjunto centralizado em um espa\u00e7o de ${fmt(R.W)} \u00d7 ${fmt(R.H)} cm; alturas medidas a partir da base do espa\u00e7o.`;
   else if (R.ref === 'meio') refTxt = `Refer\u00eancia: centro dos quadros na metade da altura da parede (${fmt(R.c)} cm do piso).`;
   else refTxt = `Refer\u00eancia: centro dos quadros a ${fmt(R.c)} cm do piso (parede livre).`;
   y += 4;
@@ -644,7 +647,7 @@ function composite(R, meta){
   }
 
   y += 10;
-  lines(`Medidas em cm. ${R.hmode === 'eixo' ? 'Refer\u00eancia: eixo (centro) do m\u00f3vel, marcado com o m\u00f3vel na posi\u00e7\u00e3o final, e piso acabado.' : R.hmode === 'borda' ? 'Refer\u00eancia: borda esquerda do m\u00f3vel, com o m\u00f3vel na posi\u00e7\u00e3o final, e piso acabado. A cota at\u00e9 a borda direita \u00e9 s\u00f3 confer\u00eancia.' : 'Refer\u00eancia: canto esquerdo da parede e piso acabado.'} Desenho proporcional; valem as cotas.`, 26, GREY, '', 38);
+  lines(`Medidas em cm. ${R.hmode === 'eixo' ? 'Refer\u00eancia: eixo (centro) do m\u00f3vel, marcado com o m\u00f3vel na posi\u00e7\u00e3o final, e piso acabado.' : R.hmode === 'borda' ? 'Refer\u00eancia: borda esquerda do m\u00f3vel, com o m\u00f3vel na posi\u00e7\u00e3o final, e piso acabado. A cota at\u00e9 a borda direita \u00e9 s\u00f3 confer\u00eancia.' : R.space ? 'Refer\u00eancia: lateral esquerda e base do espa\u00e7o livre. A cota at\u00e9 o topo do espa\u00e7o serve para conferir medindo de cima.' : 'Refer\u00eancia: canto esquerdo da parede e piso acabado.'} Desenho proporcional; valem as cotas.`, 26, GREY, '', 38);
   if (R.holes.some(h => h.rel < -0.25)) lines('Cotas com \u2190 indicam furos antes da borda esquerda do m\u00f3vel: medir da borda para a esquerda.', 26, '#9E1A1A', '700', 38);
   lines(`Conferir as medidas reais da parede e do m\u00f3vel antes de furar. Penduradores a ${fmt(R.d)} cm das laterais da moldura.`, 26, GREY, '', 38);
   y += P - 40;
@@ -694,7 +697,12 @@ function updateRefUI(){
   const eixo = hm !== 'parede';
   $('furnXLabel').hidden = eixo;
   $('furnWHint').textContent = hm === 'borda' ? 'obrigat\u00f3ria neste modo' : hm === 'eixo' ? 'opcional, para desenho e avisos' : 'cm';
-  $('wallWHint').textContent = eixo ? 'opcional neste modo' : 'cm';
+  $('wallWHint').textContent = eixo ? 'opcional neste modo' : '';
+  const sp = state.ref === 'espaco';
+  $('paredeLegend').textContent = sp ? 'Espa\u00e7o livre (cm)' : 'Parede (cm)';
+  $('wallWTxt').textContent = sp ? 'Largura do espa\u00e7o' : 'Largura';
+  $('wallHTxt').textContent = sp ? 'Altura do espa\u00e7o' : 'Altura';
+  $('spaceHint').hidden = !sp;
   $('hRefHint').textContent = hm === 'borda'
     ? 'O instalador mede a partir da borda esquerda do m\u00f3vel. Me\u00e7a a largura exatamente entre as mesmas bordas que ele vai usar (ex.: estrutura da cama, n\u00e3o o colch\u00e3o).'
     : hm === 'eixo'
@@ -748,8 +756,10 @@ function render(){
   const cTxt = r2(cMin) === r2(cMax)
     ? `Centro a <b>${fmt(cMin)} cm</b> (${sgn(cMin - 160)} do padr\u00e3o 160)`
     : `Centros de <b>${fmt(cMin)} a ${fmt(cMax)} cm</b> (padr\u00e3o 160)`;
+  const fb = Math.min(...R.frames.map(f => f.top - f.A)), ft = R.H - Math.max(...R.frames.map(f => f.top));
+  const pair = (a, b) => Math.abs(a - b) < 0.25 ? `${fmt(a)} cm` : `${fmt(a)} / ${fmt(b)} cm`;
   $('chips').innerHTML = [
-    `<span class="chip${dev > 10 ? ' alert' : ''}">${cTxt}</span>`,
+    R.space ? `<span class="chip">Folga <b>${pair(ft, fb)}</b> em cima / embaixo</span>` : `<span class="chip${dev > 10 ? ' alert' : ''}">${cTxt}</span>`,
     `<span class="chip"><b>${R.holes.length}</b> furos</span>`,
     `<span class="chip">Conjunto <b>${fmt(R.totalW)} cm</b></span>`,
     R.hmode === 'borda' ? `<span class="chip">Medido da <b>borda do m\u00f3vel</b></span>`
@@ -762,7 +772,7 @@ function render(){
 function meta(){
   const d = new Date();
   const date = d.toLocaleDateString('pt-BR');
-  return { cliente: state.cliente.trim(), pedido: state.pedido.trim(), ambiente: state.ambiente.trim(), date, logo: state.logo || DEFAULT_LOGO };
+  return { cliente: state.cliente.trim(), pedido: state.pedido.trim(), ambiente: state.ambiente.trim(), date, logo: DEFAULT_LOGO };
 }
 function fileBase(){
   const d = new Date();
@@ -854,36 +864,8 @@ $('f').addEventListener('submit', e => e.preventDefault());
 $('btnExample').addEventListener('click', () => { state = { ...EXAMPLE, sizes: [], logo: state.logo }; fillForm(); render(); persist(); });
 $('btnClear').addEventListener('click', () => { state = { ...BLANK, sizes: [], logo: state.logo }; fillForm(); render(); persist(); });
 
-function showLogo(){
-  const L = state.logo || DEFAULT_LOGO;
-  $('logoPrev').innerHTML = L && L.src ? `<img src="${L.src}" alt="Logo">` : 'Sem logo';
-  $('logoRemove').hidden = !state.logo;
-}
-$('logoFile').addEventListener('change', e => {
-  const file = e.target.files && e.target.files[0];
-  if (!file) return;
-  if (file.size > 2 * 1024 * 1024){ setStatus('A logo deve ter at\u00e9 2 MB.'); return; }
-  const fr = new FileReader();
-  fr.onload = () => {
-    const img = new Image();
-    img.onload = () => {
-      // normaliza para PNG com no m\u00e1ximo 900 px de largura
-      const sc = Math.min(1, 900 / (img.naturalWidth || 900));
-      const w = Math.max(1, Math.round((img.naturalWidth || 900) * sc)), h = Math.max(1, Math.round((img.naturalHeight || 300) * sc));
-      const cv = document.createElement('canvas'); cv.width = w; cv.height = h;
-      cv.getContext('2d').drawImage(img, 0, 0, w, h);
-      state.logo = { src: cv.toDataURL('image/png'), w, h };
-      showLogo(); render(); persist(); setStatus('Logo aplicada.');
-    };
-    img.onerror = () => setStatus('N\u00e3o foi poss\u00edvel ler essa imagem. Use PNG, JPG ou SVG.');
-    img.src = fr.result;
-  };
-  fr.readAsDataURL(file);
-  e.target.value = '';
-});
-$('logoRemove').addEventListener('click', () => { state.logo = undefined; showLogo(); render(); persist(); });
 
-load(); fillForm(); showLogo(); render();
+load(); fillForm(); render();
 </script>
 </body>
 </html>
